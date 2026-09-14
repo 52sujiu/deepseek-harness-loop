@@ -30,9 +30,40 @@ DRY=1 ./.pi-glla/loop/loop.sh
 
 # 单轮墙钟上限（秒），默认 1800
 TASK_TIMEOUT=900 ./.pi-glla/loop/loop.sh
+
+# 换模型（仅首次生成 home 时生效；已有 home 请改 settings.yaml）
+MODEL=deepseek-v4-pro ./.pi-glla/loop/loop.sh
 ```
 
-前置条件：`pnpm`、`DEEPSEEK_API_KEY`（或仓库根 `.env`）。
+前置条件：`pnpm`、`DEEPSEEK_API_KEY`（或仓库根 `.env`，或 `~/.dsh/.credentials.yaml`）。
+
+## 模型是怎么定的
+
+结论先说：**`headless` profile 没有 `--model` 参数**（`--help` 只有 `-h`），模型来自 settings 里全局共享的 `agent-default-model` 段。
+
+所以脚本给循环一份**专属 `DSH_HOME`**（`.pi-glla/loop/home/`），首次运行时生成：
+
+```yaml
+agent-default-model:
+  provider: deepseek-official
+  model: deepseek-flash      # MODEL= 可覆盖
+  reasoningEffort: high
+permission:
+  defaultPreset: danger-full-access
+```
+
+凭证不复制，只按符号链接共享 `~/.dsh/.credentials.yaml`；`.gitignore` 已排除整个 `home/`。顺带也隔离了会话——循环跑挂不会污染日常 dsh 状态。
+
+**为什么不用 `--patch` 指定模型？** 实测会被 settings 盖掉：
+
+| settings `agent-default-model` | `--patch` 指定 | 实际请求的模型 |
+|---|---|---|
+| `deepseek-flash` | `deepseek-v4-pro` | **`deepseek-flash`** |
+| 无该段 | `deepseek-v4-pro` | `deepseek-v4-pro` |
+
+坑在于 `--dump-config` 只显示 composition entry，会**误报** patch 生效（那里显示 `v4-pro`，运行时实际用 `deepseek-flash`）。判定实际模型只能读会话日志——`sessions/**/session.v3.jsonl.zstd` 里的 `model` 字段，或 system-prompt 的 `powered by the X model`。
+
+另外：`deepseek-official` 路由只认 `deepseek-flash` 和 `deepseek-v4-pro`，其它名字会在请求时报 `INVALID_REQUEST`。
 
 ## 终止条件
 

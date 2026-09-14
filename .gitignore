@@ -2,6 +2,9 @@
 .pi-glla/loop/logs/
 .pi-glla/loop/.lock
 
+# 循环专用 DSH_HOME（含凭证符号链接），绝不提交
+.pi-glla/loop/home/
+
 # 各项目自己的 agent 工作区
 .pi-glla/runs/
 .pi-glla/goals/
