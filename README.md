@@ -30,40 +30,59 @@ DRY=1 ./.pi-glla/loop/loop.sh
 
 # 单轮墙钟上限（秒），默认 1800
 TASK_TIMEOUT=900 ./.pi-glla/loop/loop.sh
-
-# 换模型（仅首次生成 home 时生效；已有 home 请改 settings.yaml）
-MODEL=deepseek-v4-pro ./.pi-glla/loop/loop.sh
 ```
 
-前置条件：`pnpm`、`DEEPSEEK_API_KEY`（或仓库根 `.env`，或 `~/.dsh/.credentials.yaml`）。
+前置条件：`pnpm`、本地 **WorkBuddy relay** 在 `127.0.0.1:8787` 上跑着（脚本启动时会探活，不通直接退出）。
 
 ## 模型是怎么定的
 
-结论先说：**`headless` profile 没有 `--model` 参数**（`--help` 只有 `-h`），模型来自 settings 里全局共享的 `agent-default-model` 段。
+跑的是 `workbuddy` relay 上的 `deepseek-v4.1-flash`——和 TUI 里同一个模型，**不走官方 `deepseek-official`**。
 
-所以脚本给循环一份**专属 `DSH_HOME`**（`.pi-glla/loop/home/`），首次运行时生成：
+### 为什么需要专属 DSH_HOME
 
-```yaml
-agent-default-model:
-  provider: deepseek-official
-  model: deepseek-flash      # MODEL= 可覆盖
-  reasoningEffort: high
-permission:
-  defaultPreset: danger-full-access
-```
+先说两个实测结论：
 
-凭证不复制，只按符号链接共享 `~/.dsh/.credentials.yaml`；`.gitignore` 已排除整个 `home/`。顺带也隔离了会话——循环跑挂不会污染日常 dsh 状态。
-
-**为什么不用 `--patch` 指定模型？** 实测会被 settings 盖掉：
+1. **`headless` profile 没有 `--model` 参数**，`--help` 只有 `-h`。模型来自 settings 的 `agent-default-model` 段，而这份 settings 是**全局共享**的。
+2. **`--patch` 覆盖不了它**，会被 settings 盖掉：
 
 | settings `agent-default-model` | `--patch` 指定 | 实际请求的模型 |
 |---|---|---|
 | `deepseek-flash` | `deepseek-v4-pro` | **`deepseek-flash`** |
 | 无该段 | `deepseek-v4-pro` | `deepseek-v4-pro` |
 
-坑在于 `--dump-config` 只显示 composition entry，会**误报** patch 生效（那里显示 `v4-pro`，运行时实际用 `deepseek-flash`）。判定实际模型只能读会话日志——`sessions/**/session.v3.jsonl.zstd` 里的 `model` 字段，或 system-prompt 的 `powered by the X model`。
+坑在于 `--dump-config` 只显示 composition entry，会**误报** patch 生效（显示 `v4-pro`，运行时用 `deepseek-flash`）。判定实际模型只能读会话日志——`sessions/**/session.v3.jsonl.zstd` 的 `model` 字段，或 system-prompt 的 `powered by the X model`。
 
-另外：`deepseek-official` 路由只认 `deepseek-flash` 和 `deepseek-v4-pro`，其它名字会在请求时报 `INVALID_REQUEST`。
+所以循环自带一份 `DSH_HOME`（`.pi-glla/loop/home/`），首次运行生成：
+
+```yaml
+llm-pi-ai:
+  providers:
+    workbuddy:
+      displayName: WorkBuddy (local relay)
+      baseURL: http://127.0.0.1:8787/v1
+      api: openai-completions
+      apiKeyEnv: WORKBUDDY_API_KEY
+      compat:
+        supportsDeveloperRole: false
+        supportsReasoningEffort: false
+      models:
+        - id: deepseek-v4.1-flash
+agent-default-model:
+  provider: workbuddy
+  model: deepseek-v4.1-flash
+```
+
+凭证不复制，只按符号链接共享 `~/.dsh/.credentials.yaml`；`.gitignore` 排除整个 `home/`。顺带隔离了会话——循环跑挂不碰日常 dsh 状态。
+
+### 三个会咬人的坑
+
+**`pi-workbuddy` 在 headless 里不存在。** TUI 里那条路由叫 `pi-workbuddy`，但 headless 只认 `llm-pi-ai` 按 **settings key** 注册的名字 —— 这里就是 `workbuddy`。写成 `pi-workbuddy` 会 `NO_ADAPTER: no adapter registered for provider`。同一个 relay、同一个模型，只是路由名的层级不同。
+
+**relay 不支持 reasoning effort。** 它声明 `supportsReasoningEffort: false`，所以 settings 里**不能**写 `reasoningEffort: max`——写了会 `UNSUPPORTED_REASONING_EFFORT` 直接启动失败。TUI 里能用 `max` 是因为它走的是另一条注入的路由。
+
+**`apiKey` 不是 `apiKeyEnv`。** schema 只接受 `apiKeyEnv`（环境变量名）；写 `apiKey: local-relay` 会在请求时报 `no API key for provider`。脚本 export 了 `WORKBUDDY_API_KEY=local-relay`（本地 relay 的占位串，不是真密钥）。
+
+切模型：删掉 `home/settings.yaml` 重跑，或直接改它。relay 还暴露了 `gpt-5.6-sol`、`kimi-k3`、`glm-5.3` 等 20 个模型，`curl http://127.0.0.1:8787/v1/models` 可以看全量。
 
 ## 终止条件
 

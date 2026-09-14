@@ -26,17 +26,39 @@ unset NODE_ENV
 # settings 有 deepseek-flash 时，patch 指定 v4-pro 仍然跑 deepseek-flash）。
 # 要让循环跑固定模型，只能给它一份自己的 home —— 顺带也隔离了会话与凭证，
 # 循环跑挂不会污染你日常的 dsh 状态。
-MODEL="${MODEL:-deepseek-flash}"
+#
+# 模型走本地 WorkBuddy relay（和 TUI 同一个模型），不走官方 deepseek-official：
+# TUI 里那条路由叫 pi-workbuddy，但 headless 只认 llm-pi-ai 按 settings key
+# 注册的名字 workbuddy —— 写成 pi-workbuddy 会 NO_ADAPTER。
+# relay 声明 supportsReasoningEffort: false，所以这里不能设 reasoningEffort，
+# 否则 UNSUPPORTED_REASONING_EFFORT；凭证是本地 relay 的占位串，不是密钥。
+MODEL="${MODEL:-deepseek-v4.1-flash}"
+MODEL_PROVIDER="${MODEL_PROVIDER:-workbuddy}"
+RELAY_BASE_URL="${RELAY_BASE_URL:-http://127.0.0.1:8787/v1}"
 LOOP_HOME="${LOOP_HOME:-$PWD/.pi-glla/loop/home}"
 mkdir -p "$LOOP_HOME"
 if [[ ! -f "$LOOP_HOME/settings.yaml" ]]; then
   cat > "$LOOP_HOME/settings.yaml" <<EOF
 # 迭代循环专用 settings，由 loop.sh 首次运行时生成。
-# 想换模型改这里，或跑 MODEL=... loop.sh 重新生成。
+# 换模型：删掉本文件重跑，或直接改这里。
+llm-pi-ai:
+  providers:
+    workbuddy:
+      displayName: WorkBuddy (local relay)
+      baseURL: ${RELAY_BASE_URL}
+      api: openai-completions
+      apiKeyEnv: WORKBUDDY_API_KEY
+      compat:
+        supportsDeveloperRole: false
+        supportsReasoningEffort: false
+      models:
+        - id: deepseek-v4.1-flash
+          name: Deepseek-V4.1-Flash (WorkBuddy)
+          contextWindow: 300000
+          maxTokens: 128000
 agent-default-model:
-  provider: deepseek-official
+  provider: ${MODEL_PROVIDER}
   model: ${MODEL}
-  reasoningEffort: high
 permission:
   defaultPreset: danger-full-access
 EOF
@@ -46,17 +68,20 @@ EOF
   done
 fi
 export DSH_HOME="$LOOP_HOME"
+# 本地 relay 的占位凭证；真实密钥类路由才需要各自的环境变量。
+export WORKBUDDY_API_KEY="${WORKBUDDY_API_KEY:-local-relay}"
 
 # 单实例锁：并发跑会互相覆盖 PROGRESS.md。mkdir 是原子的，macOS 无 flock。
 mkdir "$LOOP_DIR/.lock" 2>/dev/null || { echo "已有 loop 在跑（$LOOP_DIR/.lock），退出。"; exit 1; }
 trap 'rmdir "$LOOP_DIR/.lock" 2>/dev/null' EXIT
 
-# 前置检查：缺 key 时 10 轮全废，不如现在停。
+# 前置检查：relay 不通时 10 轮全废，不如现在停。
 if [[ "${DRY:-0}" != "1" ]]; then
-  if [[ -z "${DEEPSEEK_API_KEY:-}" && ! -f .env && ! -e "$LOOP_HOME/.credentials.yaml" ]]; then
-    echo "缺 DEEPSEEK_API_KEY、.env 与凭证文件，退出。"; exit 1
-  fi
   command -v pnpm >/dev/null || { echo "缺 pnpm，退出。"; exit 1; }
+  if ! curl -sf -m 5 -o /dev/null "${RELAY_BASE_URL%/v1}/v1/models" 2>/dev/null \
+     && ! curl -sf -m 5 -o /dev/null "$RELAY_BASE_URL/models" 2>/dev/null; then
+    echo "WorkBuddy relay（$RELAY_BASE_URL）不可达，退出。"; exit 1
+  fi
 fi
 
 # macOS 不自带 timeout（GNU coreutils 装成 gtimeout）。
