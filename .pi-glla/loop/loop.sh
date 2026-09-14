@@ -212,9 +212,10 @@ $(cat "$LOOP_DIR/BACKLOG.md" 2>/dev/null || echo '（空，本轮请自行侦察
       prev=0
       while :; do
         sleep "$PROGRESS_INTERVAL"
-        # 每轮一个全新 session，取最新的那个即可。不用 -newermt：那是 GNU 扩展，
-        # macOS 的 BSD find 会报 "Can't parse date/time"。
-        sess=$(ls -t "$LOOP_HOME"/sessions/*/session.v3.jsonl.zstd 2>/dev/null | head -1)
+        # 每轮一个全新 session，取最新的那个即可。路径是三层：
+        # sessions/<项目名>/<session-id>/session.v3.jsonl.zstd。
+        # 不用 -newermt：GNU 扩展，macOS 的 BSD find 报 "Can't parse date/time"。
+        sess=$(ls -t "$LOOP_HOME"/sessions/*/*/session.v3.jsonl.zstd 2>/dev/null | head -1)
         if [[ -n "$sess" ]]; then
           cur=$(wc -c < "$sess" 2>/dev/null | tr -d ' \t'); [[ -z "$cur" ]] && cur=0
         else
