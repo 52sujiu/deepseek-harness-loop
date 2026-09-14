@@ -16,6 +16,8 @@ MAX="${MAX:-10}"
 LOOP_DIR=".pi-glla/loop"
 LOG_DIR="$LOOP_DIR/logs"
 TASK_TIMEOUT="${TASK_TIMEOUT:-1800}"
+# 实时进度刷新间隔（秒）。默认 15 秒原地重画一行；设 0 关掉。
+PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-15}"
 mkdir -p "$LOG_DIR"
 
 # 关键：清掉泄漏的 NODE_ENV，否则 client 规格整体加载失败。
@@ -186,16 +188,30 @@ $(cat "$LOOP_DIR/BACKLOG.md" 2>/dev/null || echo '（空，本轮请自行侦察
     BUFFER=()
   fi
 
-  # 心跳：模型思考时可能几分钟没有任何输出，不报点什么会让人以为死了。
-  ( while :; do
-      sleep 30
-      printf '   ... 第 %s 轮进行中（已 %ss，日志 %s）\n' "$i" "$SECONDS" "$(wc -l < "$log" 2>/dev/null || echo 0)行"
-    done ) &
-  heartbeat=$!
+  # 实时进度：模型思考时可能几分钟没输出，不刷点什么会让人以为死了。
+  # 默认每 PROGRESS_INTERVAL 秒重画一行状态，不用另开终端 tail -f。
+  # 摘要从日志尾部抓，内容是 agent 真在做的事，不是干巴巴的计时。
+  # 非 TTY（重定向到文件、CI）时关掉：\r 重画在日志里会糊成一团。
+  heartbeat=""
+  if [[ "$PROGRESS_INTERVAL" != "0" && -t 1 ]]; then
+    ( while :; do
+        sleep "$PROGRESS_INTERVAL"
+        local_lines=$(wc -l < "$log" 2>/dev/null | tr -d ' \t'); [[ -z "$local_lines" ]] && local_lines=0
+        local_last=$(grep -avE '^\s*$|^\$ node |^You are a coding agent|^# 迭代任务' "$log" 2>/dev/null \
+                     | tail -1 | cut -c1-84)
+        # 进度走 stderr：tee 在往 stdout 写，两者共用 stdout 会互相截断，
+        # 把两帧的摘要粘成一行。\r 就地重画，\033[K 清掉上一帧更长的残尾。
+        printf '\r   ⏳ 第%s轮 %ss · %s行 · %s\033[K' "$i" "$SECONDS" "$local_lines" "$local_last" >&2
+      done ) &
+    heartbeat=$!
+  fi
 
   run_timed "${BUFFER[@]}" pnpm dsh --profile headless --patch "$CMC_PATCH" "$task" 2>&1 | tee "$log"
   rc="${PIPESTATUS[0]}"
-  kill "$heartbeat" 2>/dev/null; wait "$heartbeat" 2>/dev/null
+  if [[ -n "$heartbeat" ]]; then
+    kill "$heartbeat" 2>/dev/null; wait "$heartbeat" 2>/dev/null
+    printf '\r\033[K' >&2   # 擦掉进度行，别和结果混在一起
+  fi
 
   if (( rc == 0 )); then
     echo "── iteration ${i}: completed (model ${MODEL})"

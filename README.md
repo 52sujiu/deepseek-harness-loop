@@ -30,6 +30,9 @@ DRY=1 ./.pi-glla/loop/loop.sh
 
 # 单轮墙钟上限（秒），默认 1800
 TASK_TIMEOUT=900 ./.pi-glla/loop/loop.sh
+
+# 进度刷新间隔，默认 15 秒；设 0 关掉
+PROGRESS_INTERVAL=5 ./.pi-glla/loop/loop.sh
 ```
 
 前置条件：`pnpm`、本地 **WorkBuddy relay** 在 `127.0.0.1:8787` 上跑着（脚本启动时会探活，不通直接退出）。
@@ -132,6 +135,20 @@ headless **不加载 agent preset**（`--dump-config` 的 87 个插件里没有 
 **为什么用绝对路径：** patch 行用**裸包名**时从 harness base 解析，用户装的第三方包在 base 里不可见；用相对/绝对路径才按所在目录解析。脚本生成 overlay 时把两个包的绝对路径写进去，并在启动前逐个 `-f` 校验，缺包直接退出而不是跑到一半才发现。
 
 配套的归档器 `dsh-context-mode` 是必需的——**策略本身能独立工作，但它写的 Archive Index 只有归档器在跑时才解析得开**。归档器只依赖 `tools`/`systemPrompt` 这类通用服务，没有 TUI 专有依赖，所以 headless 挂得上。挂上后循环会话里会出现 8 个 `ctx_*` 工具（`ctx_search`、`ctx_index`、`ctx_execute`…）。
+
+## 实时进度
+
+跑起来就在**原地刷一行状态**，不用另开终端 `tail -f`：
+
+```
+   ⏳ 第1轮 45s · 12行 · reading packages/core/agent-loop/src/index.ts
+```
+
+左侧是已运行秒数和日志行数，右侧是**从日志尾部抓的当前动作**——所以你能看出 agent 真在干什么，而不是干等一个计时器。默认每 15 秒刷一次，`PROGRESS_INTERVAL` 可调，设 0 关掉。
+
+进度写在 **stderr**、日志走 stdout：两者共用 stdout 会互相截断。非 TTY（重定向到文件、CI）时自动关闭，否则 `\r` 重画会在日志里糊成一团。
+
+配合 `tee` 的行缓冲（`stdbuf -oL`），`tail -f .pi-glla/loop/logs/iter-1.log` 也能实时看到内容——而不是等一轮跑完才落盘。
 
 ## 终止条件
 
