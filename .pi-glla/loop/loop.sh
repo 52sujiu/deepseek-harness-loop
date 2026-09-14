@@ -112,14 +112,31 @@ EOF
 
 # 单实例锁：并发跑会互相覆盖 PROGRESS.md。mkdir 是原子的，macOS 无 flock。
 mkdir "$LOOP_DIR/.lock" 2>/dev/null || { echo "已有 loop 在跑（$LOOP_DIR/.lock），退出。"; exit 1; }
+
+# Ctrl-C：明确告诉人"这是你按的"，而不是留下一句像崩溃的 ELIFECYCLE。
+# pnpm 在跑任意 script 前会做 depsStatusCheck，不同步时自动 install；
+# 此时被中断，pnpm 会把 SIGINT 报成 "Command failed with exit code 1"。
+interrupted=0
+trap 'interrupted=1; echo; echo "已中断（Ctrl-C）。本轮作废，PROGRESS.md 未被写入。"; rmdir "$LOOP_DIR/.lock" 2>/dev/null; exit 130' INT TERM
 trap 'rmdir "$LOOP_DIR/.lock" 2>/dev/null' EXIT
 
-# 前置检查：relay 不通时 10 轮全废，不如现在停。
+# 前置检查：relay 不通、依赖没装好，10 轮全废，不如现在停。
 if [[ "${DRY:-0}" != "1" ]]; then
   command -v pnpm >/dev/null || { echo "缺 pnpm，退出。"; exit 1; }
   if ! curl -sf -m 5 -o /dev/null "${RELAY_BASE_URL%/v1}/v1/models" 2>/dev/null \
      && ! curl -sf -m 5 -o /dev/null "$RELAY_BASE_URL/models" 2>/dev/null; then
     echo "WorkBuddy relay（$RELAY_BASE_URL）不可达，退出。"; exit 1
+  fi
+  # 预热依赖：pnpm 会在每次 run script 前校验依赖状态，不同步就自动 install。
+  # 放到循环外跑一次，中途就不会突然卡住几百秒（也免得被 Ctrl-C 打断时
+  # 看到一句莫名其妙的 "Command failed with exit code 1"）。
+  #
+  # CI=true 是必需的，不是可选的：pnpm 要重建 node_modules 时会先问一句，
+  # 非交互环境下它直接中止并报 ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY。
+  # 循环本来就不该有人在旁边敲 y。
+  echo "校验依赖状态（首次可能要一两分钟，请等它跑完再 Ctrl-C）..."
+  if ! CI=true pnpm install --frozen-lockfile >/dev/null 2>&1; then
+    echo "依赖校验失败，先手动跑 pnpm install 看报错，退出。"; exit 1
   fi
 fi
 
@@ -159,15 +176,39 @@ $(cat "$LOOP_DIR/BACKLOG.md" 2>/dev/null || echo '（空，本轮请自行侦察
   fi
 
   log="$LOG_DIR/iter-$i.log"
-  run_timed pnpm dsh --profile headless --patch "$CMC_PATCH" "$task" 2>&1 | tee "$log"
+  # tee 默认块缓冲：一轮跑完才落盘，中途 `tail -f` 看不到任何东西。
+  # stdbuf 强制行缓冲（macOS 走 gstdbuf；都没有就退回原样，只是实时性差些）。
+  if command -v stdbuf >/dev/null; then
+    BUFFER=(stdbuf -oL -eL)
+  elif command -v gstdbuf >/dev/null; then
+    BUFFER=(gstdbuf -oL -eL)
+  else
+    BUFFER=()
+  fi
+
+  # 心跳：模型思考时可能几分钟没有任何输出，不报点什么会让人以为死了。
+  ( while :; do
+      sleep 30
+      printf '   ... 第 %s 轮进行中（已 %ss，日志 %s）\n' "$i" "$SECONDS" "$(wc -l < "$log" 2>/dev/null || echo 0)行"
+    done ) &
+  heartbeat=$!
+
+  run_timed "${BUFFER[@]}" pnpm dsh --profile headless --patch "$CMC_PATCH" "$task" 2>&1 | tee "$log"
   rc="${PIPESTATUS[0]}"
+  kill "$heartbeat" 2>/dev/null; wait "$heartbeat" 2>/dev/null
 
   if (( rc == 0 )); then
     echo "── iteration ${i}: completed (model ${MODEL})"
   elif (( rc == 124 )); then
     echo "── iteration ${i}: timed out after ${TASK_TIMEOUT}s (${log})"
+  elif (( rc == 130 )); then
+    echo "── iteration ${i}: interrupted"
+    break
   else
     echo "── iteration ${i}: failed (exit ${rc})"
+    # 失败时把决定性的一行挑出来，别让人去翻整个 log。
+    grep -aE '^dsh: |^\[ERROR\]|Error:|error:|ERR_PNPM' "$log" 2>/dev/null | head -5 | sed 's/^/     /'
+    echo "     （完整日志 ${log}）"
   fi
 
   # 每轮留一份 diff：改动互相污染时能归因到具体轮次。
