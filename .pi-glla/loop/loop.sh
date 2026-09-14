@@ -29,7 +29,11 @@ LOG_DIR="$LOOP_DIR/logs"
 TASK_TIMEOUT="${TASK_TIMEOUT:-1800}"
 # 实时进度刷新间隔（秒）。默认 15 秒原地重画一行；设 0 关掉。
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-15}"
+# 整个循环的墙钟上限（秒），默认 6 小时。无人值守时别让它无限跑下去。
+TOTAL_TIMEOUT="${TOTAL_TIMEOUT:-21600}"
 mkdir -p "$LOG_DIR"
+
+LOOP_START=$SECONDS
 
 # 关键：清掉泄漏的 NODE_ENV，否则 client 规格整体加载失败。
 unset NODE_ENV
@@ -171,6 +175,12 @@ for i in $(seq 1 "$MAX"); do
 
   if head -1 "$LOOP_DIR/PROGRESS.md" 2>/dev/null | grep -q '^DONE'; then
     echo "PROGRESS.md 标记 DONE，停止。"
+    break
+  fi
+
+  # 无人值守时的总时长闸：跑久了就收工，别耗尽一整晚。
+  if (( SECONDS - LOOP_START >= TOTAL_TIMEOUT )); then
+    echo "已达总时长上限 ${TOTAL_TIMEOUT}s（已跑 $(( SECONDS - LOOP_START ))s），停止。"
     break
   fi
 

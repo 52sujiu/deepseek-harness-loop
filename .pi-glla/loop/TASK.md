@@ -28,8 +28,22 @@
 | 类型 | `pnpm run typecheck` |
 | 文档 | `pnpm run test:docs` |
 | 生产可见输出变更 | `DSH_SNAPSHOT=replay pnpm run test:web` |
+| 代码风格 | `pnpm run lint`（见下方警告） |
 
 **注意 `env -u NODE_ENV`**：本机 shell 环境里 `NODE_ENV=production` 会泄漏进 vitest，导致 `devFreeze` 类分支被误跳过、约 200 个 client 规格文件报 `(0 test)`。这是既有环境问题，不是你的改动造成的。
+
+**不要裸跑 `npx oxlint`。** 上一轮有人这么跑，5 分钟耗尽、零输出、被 SIGTERM 杀掉，白白浪费一轮。原因有两个：
+
+1. 它绕过 `scripts/run-oxlint.ts`。那个包装脚本施加线程上限（`DSH_OXLINT_THREADS`），裸跑则 oxlint 吃满所有 CPU 核 —— 本仓库 291 个 package，14 核全占也跑不完。
+2. 它没有 `pnpm run lint` 前置的 `build:lib:host`，缺少类型信息。
+
+正门是 `pnpm run lint`。它慢（要先 build），所以**只在改动确实涉及 lint 规则时才跑**；纯逻辑/测试改动不跑也合规，在 PROGRESS 里说明即可。
+
+## 命令选择与超时
+
+自选命令时（尤其是 lint / build / 全量脚本），**超时设 120 秒以内**。超过就当成"这条不适合本轮"放弃，换更窄的一档，别硬等 —— 卡在一条命令上等于这一轮没有产出。
+
+判断标准：如果一条命令的用途是"确认没弄坏别的"，那它应该几秒到几十秒返回。要几分钟说明选错了档位。
 
 ## 如何找候选（BACKLOG 为空时）
 
