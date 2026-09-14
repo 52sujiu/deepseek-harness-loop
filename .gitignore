@@ -1,0 +1,19 @@
+# 循环运行时产物
+.pi-glla/loop/logs/
+.pi-glla/loop/.lock
+
+# 各项目自己的 agent 工作区
+.pi-glla/runs/
+.pi-glla/goals/
+.pi-glla/archive/
+
+# 依赖与构建产物
+node_modules/
+dist/
+lib/
+*.log
+.DS_Store
+
+# 绝不提交
+.env
+.env.*
