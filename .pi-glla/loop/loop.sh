@@ -107,7 +107,7 @@ export WORKBUDDY_API_KEY="${WORKBUDDY_API_KEY:-local-relay}"
 CMC_MODULE="$HOME/.dsh/profiles/dsh-tui/node_modules/dsh-context-mode-compaction/lib/types/index.js"
 CM_MODE_MODULE="$HOME/.dsh/profiles/dsh-tui/node_modules/dsh-context-mode/lib/types/index.js"
 for f in "$CMC_MODULE" "$CM_MODE_MODULE"; do
-  [[ -f "$f" ]] || { echo "缺压缩包：$f（npm i -g 或装到 dsh-tui profile），退出。"; exit 1; }
+  [[ -f "$f" ]] || { echo "缺压缩包：${f}（npm i -g 或装到 dsh-tui profile），退出。"; exit 1; }
 done
 CMC_PATCH="$LOOP_DIR/cmc.patch.yml"
 cat > "$CMC_PATCH" <<EOF
@@ -144,7 +144,7 @@ if [[ "${DRY:-0}" != "1" ]]; then
   command -v pnpm >/dev/null || { echo "缺 pnpm，退出。"; exit 1; }
   if ! curl -sf -m 5 -o /dev/null "${RELAY_BASE_URL%/v1}/v1/models" 2>/dev/null \
      && ! curl -sf -m 5 -o /dev/null "$RELAY_BASE_URL/models" 2>/dev/null; then
-    echo "WorkBuddy relay（$RELAY_BASE_URL）不可达，退出。"; exit 1
+    echo "WorkBuddy relay（${RELAY_BASE_URL}）不可达，退出。"; exit 1
   fi
   # 预热依赖：pnpm 会在每次 run script 前校验依赖状态，不同步就自动 install。
   # 放到循环外跑一次，中途就不会突然卡住几百秒（也免得被 Ctrl-C 打断时
@@ -177,7 +177,7 @@ i=0
 while :; do
   i=$(( i + 1 ))
   if (( MAX > 0 && i > MAX )); then
-    echo "已达轮数上限 $MAX，停止。"
+    echo "已达轮数上限 ${MAX}，停止。"
     break
   fi
   if (( MAX > 0 )); then
