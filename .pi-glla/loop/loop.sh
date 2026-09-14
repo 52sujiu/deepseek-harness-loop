@@ -200,21 +200,37 @@ $(cat "$LOOP_DIR/BACKLOG.md" 2>/dev/null || echo '（空，本轮请自行侦察
     BUF="gstdbuf -oL -eL"
   fi
 
-  # 实时进度：模型思考时可能几分钟没输出，不刷点什么会让人以为死了。
-  # 默认每 PROGRESS_INTERVAL 秒重画一行状态，不用另开终端 tail -f。
-  # 摘要从日志尾部抓，内容是 agent 真在做的事，不是干巴巴的计时。
+  # 实时进度：模型思考时可能几分钟不往 stdout 写东西，不刷点什么会让人以为死了。
+  # 默认每 PROGRESS_INTERVAL 秒重画一行，不用另开终端 tail -f。
+  #
+  # 活跃信号取自 **session 日志的大小**：agent 读代码、跑命令时 stdout 是停的，
+  # 但每次请求/工具调用都会往 session 日志追加。日志文本只当补充说明。
   # 非 TTY（重定向到文件、CI）时关掉：\r 重画在日志里会糊成一团。
   heartbeat=""
   if [[ "$PROGRESS_INTERVAL" != "0" && -t 1 ]]; then
-    ( while :; do
+    (
+      prev=0
+      while :; do
         sleep "$PROGRESS_INTERVAL"
-        local_lines=$(wc -l < "$log" 2>/dev/null | tr -d ' \t'); [[ -z "$local_lines" ]] && local_lines=0
-        local_last=$(grep -avE '^\s*$|^\$ node |^You are a coding agent|^# 迭代任务' "$log" 2>/dev/null \
-                     | tail -1 | cut -c1-84)
-        # 进度走 stderr：tee 在往 stdout 写，两者共用 stdout 会互相截断，
-        # 把两帧的摘要粘成一行。\r 就地重画，\033[K 清掉上一帧更长的残尾。
-        printf '\r   ⏳ 第%s轮 %ss · %s行 · %s\033[K' "$i" "$SECONDS" "$local_lines" "$local_last" >&2
-      done ) &
+        # 每轮一个全新 session，取最新的那个即可。不用 -newermt：那是 GNU 扩展，
+        # macOS 的 BSD find 会报 "Can't parse date/time"。
+        sess=$(ls -t "$LOOP_HOME"/sessions/*/session.v3.jsonl.zstd 2>/dev/null | head -1)
+        if [[ -n "$sess" ]]; then
+          cur=$(wc -c < "$sess" 2>/dev/null | tr -d ' \t'); [[ -z "$cur" ]] && cur=0
+        else
+          cur=0
+        fi
+        delta=$(( cur - prev )); prev=$cur
+        # 有增长就是在干活；一帧不动可能是长思考，连着几帧不动才可疑。
+        if (( delta > 0 )); then
+          state="活跃 +$(( delta / 1024 ))K"
+        else
+          state="静默"
+        fi
+        printf '\r   ⏳ 第%s轮 %ss · %s · 会话 %sK\033[K' \
+          "$i" "$SECONDS" "$state" "$(( cur / 1024 ))" >&2
+      done
+    ) &
     heartbeat=$!
   fi
 
