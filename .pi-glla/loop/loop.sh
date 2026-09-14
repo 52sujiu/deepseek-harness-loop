@@ -4,11 +4,12 @@
 #   ./.pi-glla/loop/loop.sh              # 默认 10 轮
 #   MAX=3 ./.pi-glla/loop/loop.sh        # 跑 3 轮
 #   DRY=1 ./.pi-glla/loop/loop.sh        # 只打印不执行
-#   TASK_TIMEOUT=1800 ... loop.sh        # 单轮墙钟上限（秒），默认 30 分钟
+#   TASK_TIMEOUT=5400 ... loop.sh        # 单轮墙钟上限（秒），默认 1.5 小时
+#   TOTAL_TIMEOUT=21600 ... loop.sh      # 全程墙钟上限（秒），默认 6 小时
 #   MODEL=deepseek-v4-pro ... loop.sh    # 换模型（改的是循环专用 DSH_HOME）
 #
-# 终止条件：达到 MAX / PROGRESS.md 首行 DONE / PROGRESS.md 不再增长 /
-#           连续两轮非零退出。
+# 终止条件：达到 MAX / 达到 TOTAL_TIMEOUT / PROGRESS.md 首行 DONE /
+#           PROGRESS.md 不再增长 / 连续两轮非零退出。
 set -uo pipefail
 
 # macOS 自带 /bin/bash 是 3.2（2007）。本脚本刻意避开 4+ 语法（空数组展开、
@@ -26,7 +27,7 @@ cd "$(dirname "$0")/../.."
 MAX="${MAX:-10}"
 LOOP_DIR=".pi-glla/loop"
 LOG_DIR="$LOOP_DIR/logs"
-TASK_TIMEOUT="${TASK_TIMEOUT:-1800}"
+TASK_TIMEOUT="${TASK_TIMEOUT:-5400}"
 # 实时进度刷新间隔（秒）。默认 15 秒原地重画一行；设 0 关掉。
 PROGRESS_INTERVAL="${PROGRESS_INTERVAL:-15}"
 # 整个循环的墙钟上限（秒），默认 6 小时。无人值守时别让它无限跑下去。

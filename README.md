@@ -28,8 +28,11 @@ MAX=3 ./.pi-glla/loop/loop.sh
 # 只打印将发给 agent 的 prompt，不执行
 DRY=1 ./.pi-glla/loop/loop.sh
 
-# 单轮墙钟上限（秒），默认 1800
-TASK_TIMEOUT=900 ./.pi-glla/loop/loop.sh
+# 单轮墙钟上限（秒），默认 5400（1.5 小时）
+TASK_TIMEOUT=5400 ./.pi-glla/loop/loop.sh
+
+# 全程墙钟上限（秒），默认 21600（6 小时）
+TOTAL_TIMEOUT=21600 ./.pi-glla/loop/loop.sh
 
 # 进度刷新间隔，默认 15 秒；设 0 关掉
 PROGRESS_INTERVAL=5 ./.pi-glla/loop/loop.sh
