@@ -84,6 +84,55 @@ agent-default-model:
 
 切模型：删掉 `home/settings.yaml` 重跑，或直接改它。relay 还暴露了 `gpt-5.6-sol`、`kimi-k3`、`glm-5.3` 等 20 个模型，`curl http://127.0.0.1:8787/v1/models` 可以看全量。
 
+## 压缩策略：无损（context-mode），不是官方默认
+
+先说默认有多糟。DSH 出厂的 `compaction-basic` 是**八段式摘要**：让模型把对话"复述"成八个固定段落，而**工具输出没有自己的段落**——它只能以摘要模型恰好写下的散文形式存活。实测下来，真正说过的大部分内容在第一次压缩后就没了。
+
+循环跑起来的是 `dsh-context-mode-compaction`，**直接重建对话而不是复述**：
+
+| 来源 | 保留什么 |
+|---|---|
+| `user/message` | **整条**；超 1000 字符留首尾各 500，中间归档可检索 |
+| `assistant/message` | 首尾各 200 字符；不足 400 字符整条保留 |
+| `tool/result` | **只留一行索引**，从不复制原文——那行说明工具名、字节数、输出在哪 |
+
+每个被裁掉的位置都留一个指针，指向可检索的 `source` 和它的 `seq`。所以 checkpoint 说的是**哪个事件丢了细节**，而不只是"有个归档存在"。
+
+参数（比官方默认更激进）：
+
+| 参数 | 本循环 | 官方默认 |
+|---|---|---|
+| `thresholdRatio` | 0.8 | 0.8 |
+| `retainRatio` | **0.1** | 0.16 |
+
+窗口 300k → **240k 触发**，最近 30k 原样保留，每次重写最旧的那 70%。（`retainRatio: 0.1` 是 myharness preset 的选择：少留一点原文，多换压缩收益。）
+
+另有一层更早的压缩：`tool-result-pruner`，单个工具结果超 **8192 字符**裁成 头 4096 + 尾 1024。
+
+### 怎么挂上去的
+
+headless **不加载 agent preset**（`--dump-config` 的 87 个插件里没有 `agent-presets`），所以 myharness 里那行替换根本到不了 headless。改用 `--patch` overlay 复刻：
+
+```yaml
+- id: compaction-basic
+  disabled: true
+
+- insert:
+    - id: cmc-compaction
+      name: '<..>/dsh-context-mode-compaction/lib/types/index.js'
+      config: { thresholdRatio: 0.8, retainRatio: 0.1 }
+    - id: dsh-context-mode
+      name: '<..>/dsh-context-mode/lib/types/index.js'
+      inject: [tools, systemPrompt]
+      config: { enabled: true }
+```
+
+**为什么是 `disabled` + `insert`，而不是直接改 `name`：** `--patch` 按 id 定位时不允许改 `name`，会报 `name mismatch for "compaction-basic" ... skipping`。上游 `wire.mjs` 之所以要写个脚本，就是因为它改的是 **preset 文件里的那一行**——那条路 headless 走不通。
+
+**为什么用绝对路径：** patch 行用**裸包名**时从 harness base 解析，用户装的第三方包在 base 里不可见；用相对/绝对路径才按所在目录解析。脚本生成 overlay 时把两个包的绝对路径写进去，并在启动前逐个 `-f` 校验，缺包直接退出而不是跑到一半才发现。
+
+配套的归档器 `dsh-context-mode` 是必需的——**策略本身能独立工作，但它写的 Archive Index 只有归档器在跑时才解析得开**。归档器只依赖 `tools`/`systemPrompt` 这类通用服务，没有 TUI 专有依赖，所以 headless 挂得上。挂上后循环会话里会出现 8 个 `ctx_*` 工具（`ctx_search`、`ctx_index`、`ctx_execute`…）。
+
 ## 终止条件
 
 任一命中即停：

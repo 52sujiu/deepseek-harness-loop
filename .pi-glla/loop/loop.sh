@@ -71,6 +71,45 @@ export DSH_HOME="$LOOP_HOME"
 # 本地 relay 的占位凭证；真实密钥类路由才需要各自的环境变量。
 export WORKBUDDY_API_KEY="${WORKBUDDY_API_KEY:-local-relay}"
 
+# ── 无损压缩（context-mode 策略）───────────────────────────────────────────
+# headless 默认挂的是官方 compaction-basic：八段式摘要，工具输出没有自己的
+# 段落，压掉的原始内容不可恢复。myharness preset 里换成了 context-mode 的
+# 子类（precompact 先把 span 存进知识库，再补 Conversation Transcript +
+# Archive Index，每个被裁的位置都留 source 指针）。headless 不加载 preset，
+# 所以这里用 --patch overlay 复刻同样的效果。
+#
+# 为什么是 disabled + insert 而不是直接改 name：--patch 按 id 定位时不允许
+# 改 name（"name mismatch ... skipping"），只能关掉原行再插一行。
+# 这也是上游 wire.mjs 存在的原因——它在 preset 文件里改那一行。
+#
+# 两个包都从 dsh-tui profile 的 node_modules 解析：DSH 的 preset/patch 行
+# 用相对路径时按所在目录解析，裸包名则从 harness base 解析，用户装的第三方
+# 包在 base 里不可见。
+CMC_MODULE="$HOME/.dsh/profiles/dsh-tui/node_modules/dsh-context-mode-compaction/lib/types/index.js"
+CM_MODE_MODULE="$HOME/.dsh/profiles/dsh-tui/node_modules/dsh-context-mode/lib/types/index.js"
+for f in "$CMC_MODULE" "$CM_MODE_MODULE"; do
+  [[ -f "$f" ]] || { echo "缺压缩包：$f（npm i -g 或装到 dsh-tui profile），退出。"; exit 1; }
+done
+CMC_PATCH="$LOOP_DIR/cmc.patch.yml"
+cat > "$CMC_PATCH" <<EOF
+# 由 loop.sh 生成，勿手改。把官方 compaction-basic 换成 context-mode 无损策略。
+- id: compaction-basic
+  disabled: true
+
+- insert:
+    - id: cmc-compaction
+      name: '${CMC_MODULE}'
+      config:
+        thresholdRatio: 0.8
+        retainRatio: 0.1
+
+    - id: dsh-context-mode
+      name: '${CM_MODE_MODULE}'
+      inject: [tools, systemPrompt]
+      config:
+        enabled: true
+EOF
+
 # 单实例锁：并发跑会互相覆盖 PROGRESS.md。mkdir 是原子的，macOS 无 flock。
 mkdir "$LOOP_DIR/.lock" 2>/dev/null || { echo "已有 loop 在跑（$LOOP_DIR/.lock），退出。"; exit 1; }
 trap 'rmdir "$LOOP_DIR/.lock" 2>/dev/null' EXIT
@@ -120,7 +159,7 @@ $(cat "$LOOP_DIR/BACKLOG.md" 2>/dev/null || echo '（空，本轮请自行侦察
   fi
 
   log="$LOG_DIR/iter-$i.log"
-  run_timed pnpm dsh --profile headless "$task" 2>&1 | tee "$log"
+  run_timed pnpm dsh --profile headless --patch "$CMC_PATCH" "$task" 2>&1 | tee "$log"
   rc="${PIPESTATUS[0]}"
 
   if (( rc == 0 )); then
