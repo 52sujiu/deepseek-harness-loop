@@ -27,16 +27,6 @@
 
 ## P1 — 具名 TODO（实现已认定该做）
 
-- [ ] **`TODO(stop-loop-guard)` —— 下一轮做这个**（`hooks-claude-code/src/index.ts:268`、`hooks-codex/src/index.ts:256`）
-  连续强制续跑无上限。侦察已给出结论（见 PROGRESS 第 1 轮）：
-  - 两个 bridge 是近乎逐行孪生，重复被 `jscpd:ignore` **有意围栏** —— 不要顺手去重。
-  - codex 提到的 `stop_hook_active` **不是能力差异**：CC 有同样字段（`hooks-claude-code/src/index.ts:344`），两边都硬编码 `false`。
-  - 计数器放 `packages/hooks/hook-protocol/`（那里已拥有 sticky `stop`，`merge.ts:79-81`），按 agent/session 键、**内存态**（守卫只防单轮内失控）。
-  - 在各自 `agent/turn-stopping` handler 里用 `count < cap` 门控 `agent.steer(...)`；触顶时停手并 warn，**不要 throw**。
-  - 顺带把硬编码的 `stop_hook_active: false` 换成计数器的真实值 —— 这一改就解决了 codex 那条 TODO 的核心抱怨。
-  - `cap` 必须是校验过的 `Config` 字段（仓库规则：禁止硬编码 tunable）。CC 的 8 是默认值。
-  - **同 PR 必须改现有测试**：`hooks-claude-code/tests/coverage-cases.ts:411,426` 和 `hooks-codex/tests/coverage-cases.ts:390,404` 目前**故意断言这个坏行为**。
-
 - [ ] `packages/hooks/*/src/index.ts:188,171` — `TODO(hook-continue-false)`：`merged.stop` 已记录但缺 run-level 停机机制。
   **排在 stop-loop-guard 之后**：侦察确认它需要新的核心原语（拦截点没有「硬停机整轮」的能力），而循环守卫不需要。
 
@@ -65,4 +55,9 @@
 
 ## Done
 
-（尚空）
+- [x] **`TODO(stop-loop-guard)`** — 连续强制续跑加上了上限（commit `4a4eee8020`）
+  `hook-protocol` 新增 `createStopLoopCounts`（按 session+turn 计数、只留最高 key、
+  内存态）；两个 bridge 各接 `stopLoopCap`（Config 字段，默认 8）。
+  codex 的 `stop_hook_active` 硬编码 `false` 一并换成真实计数。
+  **验证**：`env -u NODE_ENV npx vitest run packages/hooks` → 19 files / 215 tests passed；
+  `pnpm run typecheck` → exit 0。

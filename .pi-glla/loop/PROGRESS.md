@@ -132,3 +132,48 @@ Test Files  1 passed (1) | Tests  20 passed (20)            # 无泄漏 → 全�
 **下一轮从这里继续**
 做 `BACKLOG.md` 的 P0 第一条或第二条。建议先做**第二条**（vitest 钉死 NODE_ENV）：改动小、可验证、一次修复一大片噪声，让后续轮次拿到干净基线。
 第一条（`devFreeze` 判据）依赖第二条的结果才能正确验证，排在其后。
+
+---
+
+## 第 2 轮 — `TODO(stop-loop-guard)` ✅
+
+**做了什么**
+给 Stop hook 的强制续跑加了连续次数上限。原先无条件 block 会无限重开同一轮
+（每次续跑本身又是一轮，同一 hook 还能再 block 它），两个 bridge 都没有上限。
+
+- `hook-protocol` 新增 `createStopLoopCounts`：按 `(sessionId, turn)` 计数，
+  只保留最高 key —— 一轮的续跑是背靠背的，不需要随会话增长的 map。
+  内存态、不持久化：守卫防单轮失控，不是会话总量。
+- 两个 bridge 各接 `stopLoopCap`（Config 字段，默认 8 = CC 自己的值），
+  在 `turn-stopping` handler 里门控续跑；触顶放行 + logger 告警，不 throw。
+- 顺带修掉 codex 的 `stop_hook_active` 硬编码 `false` —— 现在回报真实计数。
+- 两个 bridge 原先**故意断言旧行为**的测试一并更新。
+- 写了三语 Agent Note（`2026-09-15-stop-loop-guard.*`）。
+
+**验证证据**
+```
+$ env -u NODE_ENV npx vitest run packages/hooks
+Test Files  19 passed (19)
+     Tests  215 passed (215)
+```
+含三条新用例，其中决定性的一条是端到端（走 Loader + 真进程）：
+`an UNCONDITIONALLY blocking Stop hook stops forcing continuation at the cap`。
+
+```
+$ pnpm run typecheck
+exit 0
+```
+
+**已提交**：`4a4eee8020`（本轮）、`34a05f534c`（上轮测试基建）、`2915bd3102`（.gitignore）。
+工作区干净。
+
+**注意（流程教训）**
+本轮 agent 自己选了 `npx oxlint packages/hooks` 做验证，**绕过了
+`scripts/run-oxlint.ts` 的线程上限**，吃满 14 核跑满 5 分钟超时被杀、零输出，
+之后又卡在别处，最终没走到第 6 步「记账」就被人工中断。
+代码本身是完整且验证过的，但 PROGRESS 缺账（这段由人工补写）。
+`TASK.md` 已补上 lint 正门与「自选命令超时 ≤120s」的约束。
+
+**下一轮从这里继续**
+P1 只剩 `TODO(hook-continue-false)`（需要新的核心原语，见 BACKLOG 说明）。
+也可以转去 P0 剩下的 `devFreeze` 死代码判定，或 P2 那三条契约核对。
