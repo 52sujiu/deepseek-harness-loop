@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 驱动 dsh 循环迭代。每轮一个全新 headless session，状态靠磁盘文件交接。
 #
-#   ./.pi-glla/loop/loop.sh              # 默认 10 轮
-#   MAX=3 ./.pi-glla/loop/loop.sh        # 跑 3 轮
+#   ./.pi-glla/loop/loop.sh              # 不限轮数，跑到 TOTAL_TIMEOUT 或 PROGRESS.md 写 DONE
+#   MAX=3 ./.pi-glla/loop/loop.sh        # 最多跑 3 轮
 #   DRY=1 ./.pi-glla/loop/loop.sh        # 只打印不执行
 #   TASK_TIMEOUT=5400 ... loop.sh        # 单轮墙钟上限（秒），默认 1.5 小时
 #   TOTAL_TIMEOUT=21600 ... loop.sh      # 全程墙钟上限（秒），默认 6 小时
@@ -24,7 +24,8 @@ fi
 
 cd "$(dirname "$0")/../.."
 
-MAX="${MAX:-10}"
+# 轮数上限默认不限（0 = 不限）。要限制就启动时传：MAX=30 ./loop.sh
+MAX="${MAX:-0}"
 LOOP_DIR=".pi-glla/loop"
 LOG_DIR="$LOOP_DIR/logs"
 TASK_TIMEOUT="${TASK_TIMEOUT:-5400}"
@@ -171,8 +172,19 @@ prev_size=$(wc -c < "$LOOP_DIR/PROGRESS.md" 2>/dev/null | tr -d ' \t' || echo 0)
 if [[ -z "$prev_size" ]]; then prev_size=0; fi
 stall=0
 
-for i in $(seq 1 "$MAX"); do
-  echo "════════ iteration $i/$MAX ════════"
+# MAX=0（默认）不限轮数；有上限时头行显示 i/MAX。
+i=0
+while :; do
+  i=$(( i + 1 ))
+  if (( MAX > 0 && i > MAX )); then
+    echo "已达轮数上限 $MAX，停止。"
+    break
+  fi
+  if (( MAX > 0 )); then
+    echo "════════ iteration $i/$MAX ════════"
+  else
+    echo "════════ iteration $i ════════"
+  fi
 
   if head -1 "$LOOP_DIR/PROGRESS.md" 2>/dev/null | grep -q '^DONE'; then
     echo "PROGRESS.md 标记 DONE，停止。"

@@ -19,10 +19,10 @@
 然后：
 
 ```sh
-# 默认 10 轮
+# 不限轮数（默认），跑到总时长上限或 PROGRESS.md 写 DONE
 ./.pi-glla/loop/loop.sh
 
-# 3 轮
+# 最多 3 轮
 MAX=3 ./.pi-glla/loop/loop.sh
 
 # 只打印将发给 agent 的 prompt，不执行
