@@ -10,6 +10,17 @@
 # 终止条件：达到 MAX / PROGRESS.md 首行 DONE / PROGRESS.md 不再增长 /
 #           连续两轮非零退出。
 set -uo pipefail
+
+# macOS 自带 /bin/bash 是 3.2（2007）。本脚本刻意避开 4+ 语法（空数组展开、
+# mapfile、${v^^}），但那些坑只在特定分支才炸，等踩到已经浪费一轮。
+# 与其静默降级，不如现在就告诉人为什么该装新 bash。
+if (( BASH_VERSINFO[0] < 4 )); then
+  echo "检测到 bash ${BASH_VERSION%%(*}（macOS 自带的是 3.2）。"
+  echo "本脚本仍兼容 3.2，但建议装新版本：brew install bash"
+  echo "（装完确保 \`which bash\` 指向 /opt/homebrew/bin/bash）"
+  echo
+fi
+
 cd "$(dirname "$0")/../.."
 
 MAX="${MAX:-10}"
@@ -180,12 +191,13 @@ $(cat "$LOOP_DIR/BACKLOG.md" 2>/dev/null || echo '（空，本轮请自行侦察
   log="$LOG_DIR/iter-$i.log"
   # tee 默认块缓冲：一轮跑完才落盘，中途 `tail -f` 看不到任何东西。
   # stdbuf 强制行缓冲（macOS 走 gstdbuf；都没有就退回原样，只是实时性差些）。
+  # 用字符串而非数组：bash 3.2（macOS /bin/bash）在 set -u 下展开空数组
+  # `"${BUF[@]}"` 会直接报 unbound variable，bash 4+ 才允许。
+  BUF=""
   if command -v stdbuf >/dev/null; then
-    BUFFER=(stdbuf -oL -eL)
+    BUF="stdbuf -oL -eL"
   elif command -v gstdbuf >/dev/null; then
-    BUFFER=(gstdbuf -oL -eL)
-  else
-    BUFFER=()
+    BUF="gstdbuf -oL -eL"
   fi
 
   # 实时进度：模型思考时可能几分钟没输出，不刷点什么会让人以为死了。
@@ -206,7 +218,8 @@ $(cat "$LOOP_DIR/BACKLOG.md" 2>/dev/null || echo '（空，本轮请自行侦察
     heartbeat=$!
   fi
 
-  run_timed "${BUFFER[@]}" pnpm dsh --profile headless --patch "$CMC_PATCH" "$task" 2>&1 | tee "$log"
+  # shellcheck disable=SC2086  # BUF 有意按词拆开（可能为空）
+  run_timed $BUF pnpm dsh --profile headless --patch "$CMC_PATCH" "$task" 2>&1 | tee "$log"
   rc="${PIPESTATUS[0]}"
   if [[ -n "$heartbeat" ]]; then
     kill "$heartbeat" 2>/dev/null; wait "$heartbeat" 2>/dev/null
